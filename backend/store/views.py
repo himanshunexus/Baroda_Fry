@@ -13,6 +13,7 @@ from rest_framework.exceptions import ValidationError, NotFound
 from .models import Dish, Order, OrderItem
 from .serializers import DishSerializer, OrderSerializer, CheckoutSerializer
 from .services import price_cart, broadcast
+from owner.models import RestaurantSettings
 
 class SessionView(APIView):
     def get(self, request):
@@ -45,6 +46,9 @@ class CheckoutView(APIView):
         data = serializer.validated_data
         if not request.session.session_key: request.session.create()
         with transaction.atomic():
+            control = RestaurantSettings.objects.select_for_update().get(pk=1)
+            if not control.is_store_open or control.is_ordering_paused:
+                raise ValidationError('Ordering is temporarily paused. Please try again later.')
             # Lock the persistent session row to serialize retries with the same session.
             from django.contrib.sessions.models import Session
             Session.objects.select_for_update().get(session_key=request.session.session_key)
@@ -82,8 +86,13 @@ class OrderStatusView(APIView):
             order = Order.objects.select_for_update().filter(pk=pk).first()
             if not order: raise NotFound()
             target = request.data.get('status')
+            if target == 'CANCELLED':
+                reason = str(request.data.get('reason', '')).strip()[:120]
+                if not reason: raise ValidationError('A cancellation reason is required.')
+                order.cancellation_reason = reason
             try: order.transition(target)
             except DjangoValidationError as e: raise ValidationError(e.messages)
+            if target == 'CANCELLED': order.save(update_fields=['cancellation_reason'])
             if target == 'CANCELLED':
                 for item in order.items.order_by('dish_id'):
                     if item.dish_id: Dish.objects.filter(pk=item.dish_id, stock_quantity__gte=0).update(stock_quantity=F('stock_quantity')+item.quantity)

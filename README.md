@@ -25,7 +25,7 @@ npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. Staff sign in at `/kitchen` using the superuser you created. Edit dishes at `/admin/` through the same frontend origin. Keep the same hostname throughout so session cookies are shared. No default passwords are shipped.
+Open http://127.0.0.1:5173. Staff sign in at `/kitchen`; the superuser also has access to `/owner/dashboard`. Edit dishes and create staff accounts at `/admin/` through the same frontend origin. Keep the same hostname throughout so session cookies are shared. No default passwords are shipped.
 
 Local mode uses SQLite and in-memory Channels/cache for one ASGI process. It supports UI development but does **not** prove concurrent stock locking. Production explicitly requires PostgreSQL and Redis. `runserver` uses Daphne because it is installed first in Django apps.
 
@@ -38,7 +38,7 @@ Render's Free web service has no Shell or pre-deploy command. The container's [s
 1. Set its runtime to Docker, repository root as build context, and the repository [Dockerfile](Dockerfile). Clear any **Docker Command** override so the Dockerfile's startup command runs. Health check path can remain `/healthz`; repeated `200` responses and detection of port `10000` are normal Render probes, not proof that the database or menu works.
 2. In the web service's **Environment** page, set `DEBUG=false`, `LOCAL_MODE=false`, `TRUST_PROXY_SSL_HEADER=true`, and a long random `SECRET_KEY`. Set `DATABASE_URL` to the Supabase PostgreSQL **session pooler** URI on port 5432 with `sslmode=require` if the direct URI cannot connect over IPv6. Set `REDIS_URL` to the full **internal connection string** of a Render Key Value instance in the same region; verify the port is complete. Do not enter credentials in Git, Blueprint YAML, commit messages, or build arguments.
 3. Temporarily set `BOOTSTRAP_ADMIN_USERNAME` and a unique strong `BOOTSTRAP_ADMIN_PASSWORD` on the web service. On the first restart, the admin is created in Supabase; later restarts do not reset its password. After the logs say `Bootstrap admin created.`, **remove both bootstrap admin variables from Render in the same edit**. The local SQLite superuser is separate and is not transferred to Supabase.
-4. A fresh database automatically receives twelve sample dishes with the pictured Unsplash URLs and illustrative prices during startup. Existing dishes are never overwritten. No Shell or extra Render variable is needed; remove any existing `BOOTSTRAP_SAMPLE_MENU=false` setting to enable this. Set `BOOTSTRAP_SAMPLE_MENU=false` if you want an intentionally empty menu. If you also set `CLOUDINARY_URL` and `BOOTSTRAP_CLOUDINARY_IMAGES=true`, those example images are uploaded to Cloudinary on the first seed. Otherwise they retain the exact Unsplash URLs in the sample catalog. Verify prices, tax, fees, descriptions, and coverage before accepting public real-money orders.
+4. The prototype startup adds missing dishes from a 29-item sample catalog across all six categories. Existing dishes, prices, stock and availability are never overwritten. No Shell is needed; remove any existing `BOOTSTRAP_SAMPLE_MENU=false` setting to enable this. Set `BOOTSTRAP_SAMPLE_MENU=false` to manage the menu entirely yourself. If you also set `CLOUDINARY_URL` and `BOOTSTRAP_CLOUDINARY_IMAGES=true`, new sample images are copied to Cloudinary. Otherwise they retain their Unsplash URLs. Images and prices are illustrative; verify dishes, prices, tax, fees, descriptions and coverage before accepting public real-money orders.
 5. Deploy the latest `main` branch. Check for migration and bootstrap success in the deploy logs. Visit `/api/menu` to verify Supabase connectivity and menu data, then `/kitchen` to sign in. The `/healthz` endpoint only confirms the web process is responding. An empty menu means `BOOTSTRAP_SAMPLE_MENU=false` is set or the bootstrap command did not run; a `500` from `/api/menu` means inspect database connection or migrations.
 
 No paid Celery worker is needed for browsing, checkout, tracking, and kitchen status updates. Network printing needs a separate worker that can reach the kitchen printer and is unavailable in this simple free prototype. Free Render Key Value is memory-only and Free web services can spin down; use paid instances for operational reliability. Never expose the printer's port 9100 publicly.
@@ -65,6 +65,12 @@ Menu prices, delivery pincodes, 5% tax and ₹40 delivery fee are **sample confi
 
 ## Behavior and security
 
+### Owner dashboard
+
+`/owner/dashboard` requires an active Django superuser. Kitchen staff accounts cannot access owner analytics or controls. The dashboard provides live order counts, completed-order value and trends, preparation/acceptance timing, cancellation reasons, top dishes, staff shifts, emergency ordering pause, store open/close, and per-portion availability. Add existing staff accounts to the shift roster on the dashboard; create their accounts first in Django admin. Both pause and sold-out changes reach storefronts through `/ws/store/`, with periodic HTTP reconciliation. The checkout transaction also checks the locked store setting, so a stale browser cannot place an order while paused.
+
+Sales periods use the order's completion time. Existing completed orders are backfilled to their creation time when the new migration runs because historic completion timestamps were not stored. The dashboard reports **completed order value**, not collected revenue: deferred cash payments remain `UNPAID`. Net contribution subtracts recorded delivery subsidies and offer discounts, both zero by default; it does not subtract food, labour, or other costs. Confirm those figures with cash reconciliation before treating them as financial statements.
+
 - All monetary values are integer paise. Server quote and checkout independently calculate totals, tax and delivery fee. Quotes don't reserve stock; checkout totals can change if menu prices change before submission. The final order shows the committed total.
 - Checkout locks session and dish rows in a transaction, aggregates duplicate dish quantities, checks stock, and writes immutable item name/portion/price snapshots. A per-checkout UUID provides retry idempotency. Stock is restored once on allowed cancellation.
 - `PAID` means **awaiting acceptance** for this deferred-payment workflow. `payment_status=UNPAID` remains explicit; no online payment is collected and no cash collection/reconciliation feature is implemented.
@@ -84,7 +90,7 @@ cd frontend
 npm run build
 ```
 
-Tests cover price tampering, immutable snapshots, retry idempotency, stock limits, negative quantities, CSRF, delivery coverage, customer isolation, staff permissions, state transitions, cancellation restocking, quote side effects and printer control-byte sanitization. Real PostgreSQL contention, hosted Redis fanout, Cloudinary upload and physical printing require their configured services and should be verified before deployment.
+Tests cover price tampering, immutable snapshots, retry idempotency, stock limits, negative quantities, CSRF, delivery coverage, customer isolation, owner and staff permissions, store pause, sold-out toggles, shift roster, owner analytics, state transitions, cancellation restocking, quote side effects and printer control-byte sanitization. Real PostgreSQL contention, hosted Redis fanout, Cloudinary upload and physical printing require their configured services and should be verified before deployment.
 
 ## Source map
 
@@ -94,3 +100,4 @@ Tests cover price tampering, immutable snapshots, retry idempotency, stock limit
 - [Print task](backend/store/tasks.py), [ESC/POS formatter](backend/store/kitchen_printer.py)
 - [Persistent cart](frontend/src/CartContext.tsx), [menu](frontend/src/MenuScreen.tsx), [checkout](frontend/src/CheckoutModal.tsx)
 - [Kitchen dashboard](frontend/src/KitchenDashboard.tsx), [tracking](frontend/src/OrderTracking.tsx)
+- [Owner models](backend/owner/models.py), [owner API](backend/owner/views.py), [owner dashboard](frontend/src/pages/OwnerDashboard.tsx)

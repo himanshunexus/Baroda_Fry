@@ -39,6 +39,12 @@ class Order(models.Model):
     total_amount_paise = models.PositiveIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     accepted_at = models.DateTimeField(null=True, blank=True)
+    ready_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.CharField(max_length=120, blank=True)
+    delivery_subsidy_paise = models.PositiveIntegerField(default=0)
+    offer_discount_paise = models.PositiveIntegerField(default=0)
     estimated_prep_minutes = models.PositiveIntegerField(default=25)
     owner_session = models.CharField(max_length=64, editable=False)
     idempotency_key = models.UUIDField(unique=True)
@@ -50,7 +56,10 @@ class Order(models.Model):
         if target not in graph.get(self.status, []): raise ValidationError('This status transition is not allowed.')
         self.status = target
         if target == 'ACCEPTED': self.accepted_at = timezone.now()
-        self.save(update_fields=['status','accepted_at'])
+        if target == 'READY': self.ready_at = timezone.now()
+        if target == 'COMPLETED': self.completed_at = timezone.now()
+        if target == 'CANCELLED': self.cancelled_at = timezone.now()
+        self.save(update_fields=['status','accepted_at','ready_at','completed_at','cancelled_at'])
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)

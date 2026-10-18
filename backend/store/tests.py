@@ -8,6 +8,7 @@ from django.core.management import call_command
 from rest_framework.test import APIClient
 from .models import Dish, Order
 from .kitchen_printer import format_ticket
+from owner.models import KitchenStaffRoster, RestaurantSettings
 
 class OrderingTests(TestCase):
     def setUp(self):
@@ -49,8 +50,8 @@ class OrderingTests(TestCase):
         self.assertEqual(self.client.put(url,{'status':'READY'},format='json').status_code,400)
         self.assertEqual(self.client.put(url,{'status':'ACCEPTED'},format='json').status_code,200)
         self.assertIsNotNone(Order.objects.get().accepted_at)
-        self.assertEqual(self.client.put(url,{'status':'CANCELLED'},format='json').status_code,200)
-        self.assertEqual(self.client.put(url,{'status':'CANCELLED'},format='json').status_code,400)
+        self.assertEqual(self.client.put(url,{'status':'CANCELLED','reason':'Kitchen busy'},format='json').status_code,200)
+        self.assertEqual(self.client.put(url,{'status':'CANCELLED','reason':'Kitchen busy'},format='json').status_code,400)
         self.dish.refresh_from_db();self.assertEqual(self.dish.stock_quantity,2)
     def test_quote_does_not_reserve_stock(self):
         result=self.client.post('/api/orders/quote',self.payload,format='json',HTTP_X_CSRFTOKEN=self.csrf)
@@ -84,12 +85,86 @@ class BootstrapTests(TestCase):
         with patch.dict(os.environ, clear=False):
             os.environ.pop('BOOTSTRAP_SAMPLE_MENU', None)
             call_command('bootstrap', stdout=StringIO())
-            self.assertEqual(Dish.objects.count(), 12)
+            self.assertEqual(Dish.objects.count(), 29)
             Dish.objects.filter(name='Butter Chicken').update(price_paise=99999)
             call_command('bootstrap', stdout=StringIO())
+            self.assertEqual(Dish.objects.get(name='Butter Chicken').price_paise, 99999)
+            self.assertEqual(Dish.objects.count(), 29)
+            Dish.objects.filter(name='Garlic Naan').delete()
+            call_command('bootstrap', stdout=StringIO())
+            self.assertEqual(Dish.objects.count(), 29)
             self.assertEqual(Dish.objects.get(name='Butter Chicken').price_paise, 99999)
 
     def test_sample_menu_can_be_disabled(self):
         with patch.dict(os.environ, {'BOOTSTRAP_SAMPLE_MENU': 'false'}, clear=False):
             call_command('bootstrap', stdout=StringIO())
             self.assertFalse(Dish.objects.exists())
+
+
+class OwnerDashboardTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.owner = User.objects.create_superuser('owner', 'owner@example.test', 'strong-test-password')
+        self.chef = User.objects.create_user('chef', password='strong-test-password', is_staff=True)
+        self.dish = Dish.objects.create(name='Tikka', category='Starters', price_paise=10000,
+                                        portion_label='Full', stock_quantity=5)
+        self.customer = APIClient(enforce_csrf_checks=True)
+        self.csrf = self.customer.get('/api/session').data['csrfToken']
+        self.payload = {'customer_name':'Guest', 'customer_phone':'9876543210',
+                        'fulfilment_mode':'PICKUP', 'idempotency_key':str(uuid.uuid4()),
+                        'items':[{'dish_id':self.dish.pk, 'quantity':1}]}
+        self.admin = APIClient()
+        self.admin.force_authenticate(self.owner)
+
+    def test_owner_permissions_and_store_pause_are_enforced_at_checkout(self):
+        self.assertEqual(self.customer.get('/api/owner/analytics/').status_code, 403)
+        staff = APIClient(); staff.force_authenticate(self.chef)
+        self.assertEqual(staff.post('/api/owner/store-control/', {'is_ordering_paused':True}, format='json').status_code, 403)
+        result = self.admin.post('/api/owner/store-control/', {'is_ordering_paused':True}, format='json')
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(self.customer.get('/api/owner/store-status/').data['is_ordering_paused'], True)
+        self.assertEqual(self.customer.post('/api/orders', self.payload, format='json', HTTP_X_CSRFTOKEN=self.csrf).status_code, 400)
+        self.assertFalse(Order.objects.exists())
+        self.admin.post('/api/owner/store-control/', {'is_ordering_paused':False}, format='json')
+        self.assertEqual(self.customer.post('/api/orders', self.payload, format='json', HTTP_X_CSRFTOKEN=self.csrf).status_code, 201)
+
+    def test_stock_toggle_and_roster(self):
+        self.assertEqual(self.admin.patch(f'/api/owner/menu/{self.dish.pk}/toggle-stock/', {'is_available':False}, format='json').status_code, 200)
+        self.dish.refresh_from_db(); self.assertFalse(self.dish.is_available)
+        self.assertEqual(self.admin.patch(f'/api/owner/menu/{self.dish.pk}/toggle-stock/', {'is_available':'false'}, format='json').status_code, 400)
+        result = self.admin.post('/api/owner/roster/', {'user_id':self.chef.pk, 'role':'HEAD_CHEF'}, format='json')
+        self.assertEqual(result.status_code, 200)
+        roster_id = result.data['id']
+        self.assertEqual(self.admin.patch(f'/api/owner/roster/{roster_id}/shift/', {'is_on_shift':True}, format='json').status_code, 200)
+        self.assertEqual(self.admin.get('/api/owner/analytics/').data['active_staff'], 1)
+        self.assertIsNotNone(KitchenStaffRoster.objects.get(pk=roster_id).clock_in_time)
+
+    def test_completed_sales_timing_and_top_dishes(self):
+        self.customer.post('/api/orders', self.payload, format='json', HTTP_X_CSRFTOKEN=self.csrf)
+        order = Order.objects.get()
+        for status in ('ACCEPTED','PREPARING','READY','COLLECTED','COMPLETED'):
+            result=self.admin.put(f'/api/orders/{order.pk}/status', {'status':status}, format='json')
+            self.assertEqual(result.status_code, 200)
+        order.refresh_from_db(); self.assertIsNotNone(order.ready_at)
+        self.assertIsNotNone(order.completed_at)
+        order.delivery_subsidy_paise = 1000
+        order.offer_discount_paise = 500
+        order.save(update_fields=['delivery_subsidy_paise', 'offer_discount_paise'])
+        overview = self.admin.get('/api/owner/analytics/?period=TODAY')
+        self.assertEqual(overview.status_code, 200)
+        self.assertEqual(overview.data['sales']['total_orders'], 1)
+        self.assertEqual(overview.data['sales']['revenue_paise'], 10500)
+        self.assertEqual(overview.data['sales']['net_contribution_paise'], 9000)
+        self.assertIsNotNone(overview.data['performance']['average_prep_minutes'])
+        self.assertEqual(self.admin.get('/api/owner/top-dishes/?period=TODAY').data[0]['dish_name'], 'Tikka')
+
+    def test_cancellation_reason(self):
+        self.customer.post('/api/orders', self.payload, format='json', HTTP_X_CSRFTOKEN=self.csrf)
+        order=Order.objects.get()
+        self.assertEqual(self.admin.put(f'/api/orders/{order.pk}/status', {'status':'CANCELLED'}, format='json').status_code, 400)
+        self.assertEqual(self.admin.put(f'/api/orders/{order.pk}/status', {'status':'CANCELLED','reason':'Out of stock'}, format='json').status_code, 200)
+        data=self.admin.get('/api/owner/analytics/').data
+        self.assertEqual(data['performance']['cancellation_rate_percent'], 100)
+        self.assertEqual(data['performance']['cancellation_reasons'][0]['cancellation_reason'], 'Out of stock')
+        self.assertEqual(RestaurantSettings.objects.get(pk=1).max_active_order_capacity, 15)

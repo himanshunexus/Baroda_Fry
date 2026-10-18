@@ -13,5 +13,6 @@ urlpatterns = [
     path('healthz', lambda request: JsonResponse({'ok': True})),
     path('admin/', admin.site.urls),
     path('api/', include('store.urls')),
+    path('api/owner/', include('owner.urls')),
     re_path(r'^(?!static/|ws/).*$', spa),
 ]
