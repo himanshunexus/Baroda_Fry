@@ -121,8 +121,12 @@ class BootstrapTests(TestCase):
     def test_demo_orders_are_idempotent_and_excluded_from_real_sales(self):
         call_command('seed_menu', stdout=StringIO())
         call_command('seed_owner_demo', stdout=StringIO())
+        old = Order.objects.get(order_number='BFC-DEMO-01')
+        old_created = old.created_at
+        Order.objects.filter(pk=old.pk).update(created_at=old_created.replace(year=2020), completed_at=old_created.replace(year=2020))
         call_command('seed_owner_demo', stdout=StringIO())
         self.assertEqual(Order.objects.filter(is_demo=True).count(), 14)
+        self.assertGreater(Order.objects.get(pk=old.pk).created_at, old_created.replace(year=2020))
         self.assertFalse(Order.objects.filter(is_demo=True).exclude(status__in=['COMPLETED', 'CANCELLED']).exists())
         owner = User.objects.create_superuser('demo_owner', 'demo@example.test', 'strong-test-password')
         client = APIClient(); client.force_authenticate(owner)
