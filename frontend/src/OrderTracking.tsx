@@ -1,0 +1,10 @@
+import {useEffect,useState} from 'react';
+import {Check,Flame,ArrowLeft,ShoppingBag} from 'lucide-react';
+import {api,subscribe} from './api';
+import {money,type Order} from './types';
+export default function OrderTracking({id}:{id:string}){
+ const [order,setOrder]=useState<Order|null>(null),[error,setError]=useState(''),[online,setOnline]=useState(false);
+ useEffect(()=>subscribe(`/ws/orders/${id}/`,()=>{api<Order>(`/orders/${id}`).then(o=>{setOrder(o);setError('');}).catch(e=>setError(e.message));},setOnline),[id]);
+ const steps=['PAID','ACCEPTED','PREPARING','READY',order?.fulfilment_mode==='DELIVERY'?'DISPATCHED':'COLLECTED','COMPLETED'];
+ return <main className="tracking"><a href="/"><ArrowLeft size={16}/> Back to menu</a><div className="tracking-card"><div className="success-icon"><ShoppingBag size={30}/></div><div className="eyebrow">FRESH FOOD IS ON ITS WAY</div><h1>{order?.status==='CANCELLED'?'Order cancelled':order?.status==='COMPLETED'?'Enjoy every bite.':'We’ve got your order.'}</h1><p>Thank you for ordering directly with Baroda Fry Centre.</p>{error&&<p className="error">{error}</p>}{order?<><strong>{order.order_number}</strong><p className="payment-note">Online Payments Coming Soon. Order placed as Cash on Delivery / Pay at Store. Amount due: {money(order.total_amount_paise)}.</p><span className="muted">{online?'● Live updates':'Reconnecting · checking every 15 seconds'}</span><div className="timeline">{steps.map((s,i)=><div className={i<=steps.indexOf(order.status)?'done':''} key={s}><span>{i<steps.indexOf(order.status)?<Check size={16}/>:<Flame size={16}/>}</span><b>{s==='PAID'?'Awaiting acceptance':s.charAt(0)+s.slice(1).toLowerCase()}</b>{s===order.status&&<small>YOU ARE HERE</small>}</div>)}</div><p>Estimated preparation: {order.estimated_prep_minutes} minutes after acceptance.</p><div className="bill">{order.items.map((item,i)=><p key={i}>{item.quantity} × {item.dish_name}<span>{money(item.unit_price_paise*item.quantity)}</span></p>)}<strong>Total<span>{money(order.total_amount_paise)}</span></strong></div></>:!error&&<p>Loading your order…</p>}</div></main>;
+}

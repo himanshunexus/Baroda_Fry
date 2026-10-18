@@ -1,0 +1,58 @@
+services:
+  - type: keyvalue
+    name: baroda-fry-redis
+    plan: 256mb
+    ipAllowList: []
+
+  - type: web
+    name: baroda-fry-web
+    runtime: docker
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    preDeployCommand: cd backend && python manage.py migrate --noinput
+    envVars:
+      - key: DEBUG
+        value: false
+      - key: LOCAL_MODE
+        value: false
+      - key: TRUST_PROXY_SSL_HEADER
+        value: true
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: baroda-fry-redis
+          type: keyvalue
+          property: connectionString
+
+  - type: worker
+    name: baroda-fry-worker
+    runtime: docker
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A config worker --loglevel=info --concurrency=1
+    envVars:
+      - key: DEBUG
+        value: false
+      - key: LOCAL_MODE
+        value: false
+      - key: SECRET_KEY
+        fromService:
+          name: baroda-fry-web
+          type: web
+          envVarKey: SECRET_KEY
+      - key: DATABASE_URL
+        fromService:
+          name: baroda-fry-web
+          type: web
+          envVarKey: DATABASE_URL
+      - key: REDIS_URL
+        fromService:
+          name: baroda-fry-redis
+          type: keyvalue
+          property: connectionString
