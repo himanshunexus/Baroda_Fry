@@ -1,6 +1,10 @@
 import uuid
+import os
+from io import StringIO
+from unittest.mock import patch
 from django.test import TestCase, override_settings
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from rest_framework.test import APIClient
 from .models import Dish, Order
 from .kitchen_printer import format_ticket
@@ -57,3 +61,29 @@ class OrderingTests(TestCase):
         ticket=format_ticket(order)
         self.assertNotIn(b'Guest\x1b@',ticket)
         self.assertIn(b'PAYMENT: UNPAID',ticket)
+
+
+class BootstrapTests(TestCase):
+    def test_creates_admin_once_without_resetting_password(self):
+        with patch.dict(os.environ, {
+            'BOOTSTRAP_ADMIN_USERNAME': 'prototype_admin',
+            'BOOTSTRAP_ADMIN_PASSWORD': 'long-random-test-password-92841',
+            'BOOTSTRAP_SAMPLE_MENU': 'false',
+        }):
+            call_command('bootstrap', stdout=StringIO())
+            admin = User.objects.get(username='prototype_admin')
+            self.assertTrue(admin.is_superuser)
+            self.assertTrue(admin.check_password('long-random-test-password-92841'))
+            admin.set_password('changed-after-first-login-73652')
+            admin.save()
+            call_command('bootstrap', stdout=StringIO())
+            admin.refresh_from_db()
+            self.assertTrue(admin.check_password('changed-after-first-login-73652'))
+
+    def test_seed_only_when_empty(self):
+        with patch.dict(os.environ, {'BOOTSTRAP_SAMPLE_MENU': 'true'}, clear=False):
+            call_command('bootstrap', stdout=StringIO())
+            self.assertEqual(Dish.objects.count(), 12)
+            Dish.objects.filter(name='Butter Chicken').update(price_paise=99999)
+            call_command('bootstrap', stdout=StringIO())
+            self.assertEqual(Dish.objects.get(name='Butter Chicken').price_paise, 99999)

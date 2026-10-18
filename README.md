@@ -29,7 +29,21 @@ Open http://127.0.0.1:5173. Staff sign in at `/kitchen` using the superuser you 
 
 Local mode uses SQLite and in-memory Channels/cache for one ASGI process. It supports UI development but does **not** prove concurrent stock locking. Production explicitly requires PostgreSQL and Redis. `runserver` uses Daphne because it is installed first in Django apps.
 
-## Deploy on Render (recommended)
+## Deploy on Render
+
+### Free prototype on an existing web service
+
+Render's Free web service has no Shell or pre-deploy command. The container's [start-web.sh](backend/start-web.sh) now runs migrations and the one-time bootstrap before starting Daphne. If you already have a Render web service:
+
+1. Set its runtime to Docker, repository root as build context, and the repository [Dockerfile](Dockerfile). Clear any **Docker Command** override so the Dockerfile's startup command runs. Health check path can remain `/healthz`; repeated `200` responses and detection of port `10000` are normal Render probes, not proof that the database or menu works.
+2. In the web service's **Environment** page, set `DEBUG=false`, `LOCAL_MODE=false`, `TRUST_PROXY_SSL_HEADER=true`, and a long random `SECRET_KEY`. Set `DATABASE_URL` to the Supabase PostgreSQL **session pooler** URI on port 5432 with `sslmode=require` if the direct URI cannot connect over IPv6. Set `REDIS_URL` to the full **internal connection string** of a Render Key Value instance in the same region; verify the port is complete. Do not enter credentials in Git, Blueprint YAML, commit messages, or build arguments.
+3. Temporarily set `BOOTSTRAP_ADMIN_USERNAME` and a unique strong `BOOTSTRAP_ADMIN_PASSWORD` on the web service. On the first restart, the admin is created in Supabase; later restarts do not reset its password. After the logs say `Bootstrap admin created.`, **remove `BOOTSTRAP_ADMIN_PASSWORD` from Render**. The local SQLite superuser is separate and is not transferred to Supabase.
+4. For a demo menu, set `BOOTSTRAP_SAMPLE_MENU=true`. It seeds twelve sample dishes only if the menu is empty. If you also set `CLOUDINARY_URL` and `BOOTSTRAP_CLOUDINARY_IMAGES=true`, those example images are uploaded to Cloudinary on the first seed. Otherwise they stay on Unsplash. Do not turn on sample seeding for public real-money orders until prices, tax, fees, descriptions, and coverage have been verified. You can remove the bootstrap sample-menu flags after seeding.
+5. Deploy the latest `main` branch. Check for migration and bootstrap success in the deploy logs. Visit `/api/menu` to verify Supabase connectivity and menu data, then `/kitchen` to sign in. The `/healthz` endpoint only confirms the web process is responding. An empty menu means sample seeding was not enabled; a `500` from `/api/menu` means inspect database connection or migrations.
+
+No paid Celery worker is needed for browsing, checkout, tracking, and kitchen status updates. Network printing needs a separate worker that can reach the kitchen printer and is unavailable in this simple free prototype. Free Render Key Value is memory-only and Free web services can spin down; use paid instances for operational reliability. Never expose the printer's port 9100 publicly.
+
+### Paid Blueprint
 
 The supplied [render.yaml](render.yaml) and [Dockerfile](Dockerfile) deploy the React build and Django/Channels API as **one Render web service** under one hostname. The Blueprint also defines a Redis-compatible Render Key Value instance and a separate Celery worker. The web service has a migration pre-deploy command. The worker and Key Value are paid resources in this Blueprint; review Render's current pricing before creating them. A free web instance is unsuitable for live kitchen operations because it spins down when idle.
 

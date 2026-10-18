@@ -17,4 +17,4 @@ RUN SECRET_KEY=build-only-static-collection DEBUG=true LOCAL_MODE=true python /a
     chown -R app:app /app
 USER app
 WORKDIR /app/backend
-CMD ["sh", "-c", "exec daphne -b 0.0.0.0 -p ${PORT:-8000} config.asgi:application"]
+CMD ["sh", "start-web.sh"]
