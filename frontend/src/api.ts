@@ -8,9 +8,9 @@ export async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{
  if(data.csrfToken)csrf=data.csrfToken;
  return data;
 }
-export function subscribe(path:string,refresh:()=>void,onConnection:(online:boolean)=>void=()=>{}){
+export function subscribe(path:string,refresh:()=>void,onConnection:(online:boolean)=>void=()=>{},pollFallback=true){
  let stopped=false;let socket:WebSocket;let retry:ReturnType<typeof setTimeout>;
  const connect=()=>{socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}${path}`);socket.onopen=()=>{onConnection(true);refresh();};socket.onmessage=()=>refresh();socket.onclose=()=>{onConnection(false);if(!stopped)retry=setTimeout(connect,3000);};socket.onerror=()=>socket.close();};connect();
- const poll=setInterval(refresh,15000);
- return()=>{stopped=true;clearTimeout(retry);clearInterval(poll);socket.close();};
+ const poll=pollFallback?setInterval(refresh,15000):undefined;
+ return()=>{stopped=true;clearTimeout(retry);if(poll)clearInterval(poll);socket.close();};
 }

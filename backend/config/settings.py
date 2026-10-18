@@ -15,7 +15,9 @@ INSTALLED_APPS = ['daphne', 'django.contrib.admin', 'django.contrib.auth', 'djan
 MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'whitenoise.middleware.WhiteNoiseMiddleware', 'django.contrib.sessions.middleware.SessionMiddleware', 'django.middleware.common.CommonMiddleware', 'django.middleware.csrf.CsrfViewMiddleware', 'django.contrib.auth.middleware.AuthenticationMiddleware', 'django.contrib.messages.middleware.MessageMiddleware', 'django.middleware.clickjacking.XFrameOptionsMiddleware']
 ROOT_URLCONF = 'config.urls'
 TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates', 'DIRS': [], 'APP_DIRS': True, 'OPTIONS': {'context_processors': ['django.template.context_processors.request', 'django.contrib.auth.context_processors.auth', 'django.contrib.messages.context_processors.messages']}}]
-DATABASES = {'default': dj_database_url.config(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}', conn_max_age=60)}
+# Daphne serves synchronous ORM work in threads. Releasing connections after each
+# request avoids exhausting Supabase's small session-pooler client limit.
+DATABASES = {'default': dj_database_url.config(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}', conn_max_age=0)}
 if not DEBUG and DATABASES['default']['ENGINE'] != 'django.db.backends.postgresql':
     raise RuntimeError('Production requires PostgreSQL for transactional stock locks')
 ASGI_APPLICATION = 'config.asgi.application'

@@ -81,12 +81,13 @@ class OwnerOverviewView(APIView):
     permission_classes = [IsOwner]
     def get(self, request):
         period = request.query_params.get('period', 'TODAY')
+        demo = request.query_params.get('demo', 'false').lower() == 'true'
         start, end, previous_start, now = period_bounds(period)
-        all_orders = Order.objects.all()
+        all_orders = Order.objects.filter(is_demo=demo)
         scoped = all_orders.filter(created_at__gte=start, created_at__lt=end) if start else all_orders
         sales = all_orders.filter(status='COMPLETED', completed_at__gte=start, completed_at__lt=end) if start else all_orders.filter(status='COMPLETED')
         previous = all_orders.filter(status='COMPLETED', completed_at__gte=previous_start, completed_at__lt=start) if previous_start else all_orders.none()
-        live = all_orders.exclude(status__in=[Order.Status.COMPLETED, Order.Status.CANCELLED]).prefetch_related('items')
+        live = Order.objects.filter(is_demo=False).exclude(status__in=[Order.Status.COMPLETED, Order.Status.CANCELLED]).prefetch_related('items')
         counts = live.aggregate(pending=Count('id', filter=Q(status__in=['PAID', 'PENDING'])),
                                 preparing=Count('id', filter=Q(status__in=['ACCEPTED', 'PREPARING'])),
                                 delivery=Count('id', filter=Q(status='DISPATCHED')),
@@ -100,7 +101,7 @@ class OwnerOverviewView(APIView):
         order_count = scoped.count()
         chart = list(sales.annotate(day=TruncDate('completed_at')).values('day').annotate(
             orders=Count('id'), revenue_paise=Coalesce(Sum('total_amount_paise'), 0)).order_by('day'))
-        return Response({'period': period, 'sales': sales_summary(sales), 'previous_sales': sales_summary(previous),
+        return Response({'period': period, 'demo': demo, 'sales': sales_summary(sales), 'previous_sales': sales_summary(previous),
                          'live': {'count': live.count(), 'total_value_paise': counts['value'], 'pending': counts['pending'],
                                   'preparing': counts['preparing'], 'out_for_delivery': counts['delivery'],
                                   'ready_for_pickup': counts['pickup'], 'ready': counts['ready'],
@@ -156,7 +157,8 @@ class TopDishesView(APIView):
     permission_classes = [IsOwner]
     def get(self, request):
         start, end, _, _ = period_bounds(request.query_params.get('period', 'TODAY'))
-        lines = OrderItem.objects.filter(order__status='COMPLETED')
+        demo = request.query_params.get('demo', 'false').lower() == 'true'
+        lines = OrderItem.objects.filter(order__status='COMPLETED', order__is_demo=demo)
         if start: lines = lines.filter(order__completed_at__gte=start, order__completed_at__lt=end)
         rows = lines.values('dish_name', 'portion_label').annotate(units_sold=Coalesce(Sum('quantity'), 0),
                     gross_value_paise=Coalesce(Sum(F('quantity') * F('unit_price_paise')), 0)).order_by('-units_sold', '-gross_value_paise')[:5]

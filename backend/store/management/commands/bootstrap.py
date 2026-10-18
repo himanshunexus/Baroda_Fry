@@ -35,3 +35,5 @@ class Command(BaseCommand):
             if use_cloudinary and not os.getenv('CLOUDINARY_URL'):
                 raise CommandError('BOOTSTRAP_CLOUDINARY_IMAGES requires CLOUDINARY_URL.')
             call_command('seed_menu', cloudinary=use_cloudinary)
+        if os.getenv('BOOTSTRAP_DEMO_ANALYTICS', 'true').lower() == 'true':
+            call_command('seed_owner_demo')

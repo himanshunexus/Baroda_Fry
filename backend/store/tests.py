@@ -70,6 +70,7 @@ class BootstrapTests(TestCase):
             'BOOTSTRAP_ADMIN_USERNAME': 'prototype_admin',
             'BOOTSTRAP_ADMIN_PASSWORD': 'long-random-test-password-92841',
             'BOOTSTRAP_SAMPLE_MENU': 'false',
+            'BOOTSTRAP_DEMO_ANALYTICS': 'false',
         }):
             call_command('bootstrap', stdout=StringIO())
             admin = User.objects.get(username='prototype_admin')
@@ -96,9 +97,39 @@ class BootstrapTests(TestCase):
             self.assertEqual(Dish.objects.get(name='Butter Chicken').price_paise, 99999)
 
     def test_sample_menu_can_be_disabled(self):
-        with patch.dict(os.environ, {'BOOTSTRAP_SAMPLE_MENU': 'false'}, clear=False):
+        with patch.dict(os.environ, {'BOOTSTRAP_SAMPLE_MENU': 'false', 'BOOTSTRAP_DEMO_ANALYTICS': 'false'}, clear=False):
             call_command('bootstrap', stdout=StringIO())
             self.assertFalse(Dish.objects.exists())
+
+    def test_sample_images_are_unique_and_existing_edits_are_preserved(self):
+        call_command('seed_menu', stdout=StringIO())
+        self.assertEqual(Dish.objects.count(), 29)
+        self.assertEqual(Dish.objects.values('image_cloudinary_url').distinct().count(), 29)
+        changed = Dish.objects.get(name='Garlic Naan')
+        changed.image_cloudinary_url = 'https://res.cloudinary.com/demo/image/upload/baroda-fry-centre/photo-1633436374961-09b92742047b'
+        changed.price_paise = 12345
+        changed.save()
+        custom = Dish.objects.get(name='Chicken Kadai')
+        custom.image_cloudinary_url = 'https://example.com/operator-photo.jpg'
+        custom.save(update_fields=['image_cloudinary_url'])
+        call_command('seed_menu', stdout=StringIO())
+        changed.refresh_from_db(); custom.refresh_from_db()
+        self.assertIn('photo-1756821752957-00bfcadc3748', changed.image_cloudinary_url)
+        self.assertEqual(changed.price_paise, 12345)
+        self.assertEqual(custom.image_cloudinary_url, 'https://example.com/operator-photo.jpg')
+
+    def test_demo_orders_are_idempotent_and_excluded_from_real_sales(self):
+        call_command('seed_menu', stdout=StringIO())
+        call_command('seed_owner_demo', stdout=StringIO())
+        call_command('seed_owner_demo', stdout=StringIO())
+        self.assertEqual(Order.objects.filter(is_demo=True).count(), 14)
+        self.assertFalse(Order.objects.filter(is_demo=True).exclude(status__in=['COMPLETED', 'CANCELLED']).exists())
+        owner = User.objects.create_superuser('demo_owner', 'demo@example.test', 'strong-test-password')
+        client = APIClient(); client.force_authenticate(owner)
+        self.assertEqual(client.get('/api/owner/analytics/').data['sales']['total_orders'], 0)
+        self.assertGreater(client.get('/api/owner/analytics/?demo=true').data['sales']['total_orders'], 0)
+        self.assertEqual(len(client.get('/api/owner/top-dishes/').data), 0)
+        self.assertGreater(len(client.get('/api/owner/top-dishes/?demo=true').data), 0)
 
 
 class OwnerDashboardTests(TestCase):

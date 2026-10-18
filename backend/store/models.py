@@ -33,6 +33,7 @@ class Order(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PAID)
     payment_status = models.CharField(max_length=16, default='UNPAID', editable=False)
+    is_demo = models.BooleanField(default=False, editable=False, db_index=True)
     subtotal_paise = models.PositiveIntegerField()
     tax_paise = models.PositiveIntegerField(default=0)
     delivery_fee_paise = models.PositiveIntegerField(default=0)
