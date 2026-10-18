@@ -81,9 +81,15 @@ class BootstrapTests(TestCase):
             self.assertTrue(admin.check_password('changed-after-first-login-73652'))
 
     def test_seed_only_when_empty(self):
-        with patch.dict(os.environ, {'BOOTSTRAP_SAMPLE_MENU': 'true'}, clear=False):
+        with patch.dict(os.environ, clear=False):
+            os.environ.pop('BOOTSTRAP_SAMPLE_MENU', None)
             call_command('bootstrap', stdout=StringIO())
             self.assertEqual(Dish.objects.count(), 12)
             Dish.objects.filter(name='Butter Chicken').update(price_paise=99999)
             call_command('bootstrap', stdout=StringIO())
             self.assertEqual(Dish.objects.get(name='Butter Chicken').price_paise, 99999)
+
+    def test_sample_menu_can_be_disabled(self):
+        with patch.dict(os.environ, {'BOOTSTRAP_SAMPLE_MENU': 'false'}, clear=False):
+            call_command('bootstrap', stdout=StringIO())
+            self.assertFalse(Dish.objects.exists())

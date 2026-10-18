@@ -32,7 +32,9 @@ class Command(BaseCommand):
                 user_model.objects.create_superuser(username=username, email='', password=password)
                 self.stdout.write(self.style.SUCCESS('Bootstrap admin created.'))
 
-        if os.getenv('BOOTSTRAP_SAMPLE_MENU', 'false').lower() == 'true':
+        # The prototype ships with a sample catalog so a fresh database is usable
+        # on hosts without a shell. Existing menus are never overwritten.
+        if os.getenv('BOOTSTRAP_SAMPLE_MENU', 'true').lower() == 'true':
             if Dish.objects.exists():
                 self.stdout.write('Menu already has dishes; sample seed skipped.')
             else:
