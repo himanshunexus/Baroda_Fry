@@ -3,7 +3,8 @@
   "services": {
     "backend": {
       "root": "backend",
-      "framework": "django"
+      "framework": "django",
+      "buildCommand": "python manage.py migrate --noinput && python manage.py bootstrap"
     },
     "frontend": {
       "root": "frontend",
