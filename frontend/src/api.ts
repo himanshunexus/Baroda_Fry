@@ -1,7 +1,9 @@
 let csrf='';
 export async function initSession(){const r=await fetch('/api/session',{credentials:'same-origin'});if(!r.ok)throw Error('Unable to connect to the restaurant. Please try again.');const data=await r.json();csrf=data.csrfToken;return data;}
 export async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{
- if(method!=='GET'&&!csrf)await initSession();
+ // Refresh before each mutation so the header matches the latest CSRF cookie,
+ // even if another tab or serverless request rotated the shared session token.
+ if(method!=='GET')await initSession();
  const r=await fetch('/api'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:body===undefined?undefined:JSON.stringify(body)});
  const data=await r.json().catch(()=>({detail:'The service is unavailable. Please try again.'}));
  if(!r.ok)throw Error(typeof data.detail==='string'?data.detail:JSON.stringify(data));
