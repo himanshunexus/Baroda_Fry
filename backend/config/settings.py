@@ -2,14 +2,12 @@ import os
 from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 DEBUG = os.getenv('DEBUG', 'true').lower() == 'true'
 SECRET_KEY = os.getenv('SECRET_KEY', 'development-only-change-before-deployment')
 if not DEBUG and SECRET_KEY == 'development-only-change-before-deployment':
     raise RuntimeError('Set a strong SECRET_KEY in production')
-
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
 if os.getenv('RENDER_EXTERNAL_HOSTNAME'):
     ALLOWED_HOSTS.append(os.environ['RENDER_EXTERNAL_HOSTNAME'])
@@ -17,7 +15,6 @@ for vercel_host_var in ('VERCEL_URL', 'VERCEL_PROJECT_PRODUCTION_URL', 'VERCEL_B
     vercel_host = os.getenv(vercel_host_var, '').strip().strip('/')
     if vercel_host and vercel_host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(vercel_host)
-
 INSTALLED_APPS = ['daphne', 'django.contrib.admin', 'django.contrib.auth', 'django.contrib.contenttypes', 'django.contrib.sessions', 'django.contrib.messages', 'django.contrib.staticfiles', 'rest_framework', 'channels', 'store', 'owner']
 MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'whitenoise.middleware.WhiteNoiseMiddleware', 'django.contrib.sessions.middleware.SessionMiddleware', 'django.middleware.common.CommonMiddleware', 'django.middleware.csrf.CsrfViewMiddleware', 'django.contrib.auth.middleware.AuthenticationMiddleware', 'django.contrib.messages.middleware.MessageMiddleware', 'django.middleware.clickjacking.XFrameOptionsMiddleware']
 ROOT_URLCONF = 'config.urls'
@@ -27,25 +24,27 @@ TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates', 'DIR
 DATABASES = {'default': dj_database_url.config(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}', conn_max_age=0)}
 if not DEBUG and DATABASES['default']['ENGINE'] != 'django.db.backends.postgresql':
     raise RuntimeError('Production requires PostgreSQL for transactional stock locks')
-
 ASGI_APPLICATION = 'config.asgi.application'
 REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 LOCAL_MODE = os.getenv('LOCAL_MODE', 'true').lower() == 'true'
 if LOCAL_MODE and not DEBUG:
     raise RuntimeError('Disable LOCAL_MODE in production')
-CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}} if LOCAL_MODE else {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer', 'CONFIG': {'hosts': [REDIS_URL]}}}
-CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}} if LOCAL_MODE else {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': REDIS_URL}}
+# Vercel Preview cannot reach Render's private Redis network. Keep its
+# best-effort throttles and websocket handshake available; clients already
+# reconcile state through REST polling. Render and other persistent hosts use Redis.
+VERCEL_PREVIEW = os.getenv('VERCEL_ENV', '').lower() == 'preview'
+EPHEMERAL_SERVICES = LOCAL_MODE or VERCEL_PREVIEW
+CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}} if EPHEMERAL_SERVICES else {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer', 'CONFIG': {'hosts': [REDIS_URL]}}}
+CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}} if EPHEMERAL_SERVICES else {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': REDIS_URL}}
 CELERY_BROKER_URL = REDIS_URL
 CELERY_TASK_IGNORE_RESULT = True
 REST_FRAMEWORK = {'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.SessionAuthentication'], 'DEFAULT_THROTTLE_CLASSES': ['rest_framework.throttling.ScopedRateThrottle'], 'DEFAULT_THROTTLE_RATES': {'checkout': '10/min', 'login': '5/min', 'print': '10/min'}}
-
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173').split(',')
 for vercel_host_var in ('VERCEL_URL', 'VERCEL_PROJECT_PRODUCTION_URL', 'VERCEL_BRANCH_URL'):
     vercel_host = os.getenv(vercel_host_var, '').strip().strip('/')
     vercel_origin = f'https://{vercel_host}' if vercel_host else ''
     if vercel_origin and vercel_origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(vercel_origin)
-
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
@@ -57,7 +56,6 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv('HSTS_INCLUDE_SUBDOMAINS', 'false').l
 SECURE_HSTS_PRELOAD = os.getenv('HSTS_PRELOAD', 'false').lower() == 'true'
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
-
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 FRONTEND_DIST = BASE_DIR.parent / 'frontend' / 'dist'
